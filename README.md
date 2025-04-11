@@ -9,7 +9,8 @@ tinyRPC/
 ├── trpc/                    # 核心库代码
 │   ├── server.hpp          # 服务器实现
 │   ├── service.hpp         # 服务接口定义
-│   └── client.hpp          # 客户端实现
+│   ├── client.hpp          # 客户端实现
+│   └── json.hpp            # json库文件
 ├── example/                # 示例代码
 │   ├── server.cpp         # 服务器示例
 │   └── test_add.cpp       # 客户端示例
@@ -80,8 +81,7 @@ make clean
 
 ## 未来计划
 
-- [ ] 支持更多数据类型
+- [ ] 支持更多服务与数据类型
 - [ ] 添加服务发现机制
 - [ ] 支持负载均衡
-- [ ] 添加监控和统计功能
-- [ ] 支持Windows平台 
+- [ ] 添加监控和日志功能
