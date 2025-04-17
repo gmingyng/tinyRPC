@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -I./trpc
-LDFLAGS = -lpthread
+CXXFLAGS = -std=c++17 -Wall -Wextra -I./trpc -I/usr/local/include/hiredis
+LDFLAGS = -lpthread -lhiredis
 
 # 源文件目录
 SRC_DIR = ./trpc

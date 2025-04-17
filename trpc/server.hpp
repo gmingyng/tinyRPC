@@ -18,6 +18,8 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <unordered_map>
+#include <hiredis/hiredis.h>
 
 #include "json.hpp"
 #include "service.hpp"
@@ -227,12 +229,23 @@ class Server {
         Server(int port) : port_(port), 
                           server_core_(std::make_unique<ServerCore>(port)),
                           reactor_(std::make_unique<Reactor>()),
-                          threadPool_(std::make_unique<ThreadPool>(4)) {
+                          threadPool_(std::make_unique<ThreadPool>(4)),
+                          redis_context_(nullptr) {
+            // 初始化Redis连接
+            redis_context_ = redisConnect("127.0.0.1", 6379);
+            if (redis_context_ == nullptr || redis_context_->err) {
+                throw std::runtime_error("Failed to connect to Redis");
+            }
+            
             // 将监听socket添加到epoll
             reactor_->addFd(server_core_->getListenFd(), EPOLLIN | EPOLLET);
         }
 
-        ~Server() = default;
+        ~Server() {
+            if (redis_context_) {
+                redisFree(redis_context_);
+            }
+        }
 
         void registerService(const std::string& name, std::unique_ptr<BaseService> service) {
             registry_.registerService(name, std::move(service));
@@ -275,30 +288,52 @@ class Server {
                     std::string method_name = json_msg["method_name"];
                     auto args = json_msg["args"].get<std::vector<int>>();
 
-                    // 获取服务实例
+                    // 生成缓存键
+                    std::string cache_key = service_name + ":" + method_name + ":" + message;
+
+                    // 尝试从缓存获取结果
+                    redisReply* reply = (redisReply*)redisCommand(redis_context_, "GET %s", cache_key.c_str());
+                    if (reply && reply->type == REDIS_REPLY_STRING) {
+                        // 缓存命中，直接返回结果
+                        send(fd, reply->str, reply->len, 0);
+                        freeReplyObject(reply);
+                        return;
+                    }
+                    freeReplyObject(reply);
+
+                    // 缓存未命中，执行服务调用
                     auto service = registry_.getService(service_name);
                     if (!service) {
                         throw std::runtime_error("Service not found: " + service_name);
                     }
 
-                    // 调用服务方法
-                    auto compute_service = dynamic_cast<ComputeService<int>*>(service);
-                    if (!compute_service) {
-                        throw std::runtime_error("Invalid service type");
+                    // 根据服务名称动态调用对应方法
+                    int result = 0;
+                    if (service_name == "compute") {
+                        auto compute_service = dynamic_cast<ComputeService<int>*>(service);
+                        if (!compute_service) {
+                            throw std::runtime_error("Invalid service type for compute");
+                        }
+                        result = compute_service->execute(method_name, args);
+                    } else {
+                        // 可以在这里添加其他服务类型的处理
+                        throw std::runtime_error("Unsupported service type: " + service_name);
                     }
-
-                    int result = compute_service->execute(method_name, args);
-
+                    
                     // 构造响应
                     nlohmann::json response;
                     response["result"] = result;
                     std::string response_str = response.dump();
+                    
+                    // 将结果存入缓存，设置过期时间
+                    // std::string result_str = result.dump();
+                    redisCommand(redis_context_, "SETEX %s 3600 %s", 
+                                cache_key.c_str(), response_str.c_str());
 
                     // 发送响应
                     if (send(fd, response_str.c_str(), response_str.size(), 0) == -1) {
                         throw std::runtime_error("Failed to send response");
                     }
-
                 } catch (const std::exception& e) {
                     std::cerr << "Error processing message: " << e.what() << std::endl;
                     
@@ -316,6 +351,7 @@ class Server {
         std::unique_ptr<Reactor> reactor_;
         std::unique_ptr<ThreadPool> threadPool_;
         LocalServiceRegistry registry_;
+        redisContext* redis_context_;
 };
 
 } // namespace trpc 
