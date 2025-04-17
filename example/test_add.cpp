@@ -7,9 +7,16 @@ int main() {
 
         // 调用远程add方法
         std::vector<int> args = {5, 3};
-        int result = client.call<int>("compute", "add", args);
+        auto future = client.callAsync<int>("compute", "add", args);
 
-        std::cout << "5 + 3 = " << result << std::endl;
+        try {
+            int result = future.get();
+            std::cout << "Result: " << result << std::endl;
+        } catch (const std::exception& e) {
+                std::cerr << "Error: " << e.what() << std::endl;
+        }
+
+        // std::cout << "5 + 3 = " << result << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
